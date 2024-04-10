@@ -1,4 +1,6 @@
 # BioTimeTabel
 
-dfsdfsd
-sdfsdf
+таблица : personnel_employee
+таблица : iclock_transaction
+
+
