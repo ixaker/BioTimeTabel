@@ -5,6 +5,17 @@ interface EventMessage {
     [key: string]: any; // Определяет, что каждое сообщение - это объект с любым количеством свойств любого типа
 }
 
+interface rowData {
+    id: number;         // id рядка
+    name: string;       // ПІБ працівника
+    type: "d" | "n";    // тип зміни бути тільки "d" - денна або "n" - нічна
+    arrival: string;    // прихід
+    departure: string;  // ухід
+    duration: string;   // тривалість зміни
+    total: string;      // час, який зараховується
+}
+
+
 class Tabel {
     private dbClient: Client;
     private eventHandlers: Map<string, Function[]> = new Map();
@@ -53,13 +64,56 @@ class Tabel {
         });
     }
 
-    public getList(date: string): void {
+    public async getList(date: string): Promise<rowData[]> {
         console.log(`Получение списка событий для даты: ${date}`);
+
+        const result: rowData[] = [
+            {
+                id: 1,
+                name: "Іваненко Іван Іванович",
+                type: "d",
+                arrival: "08:00",
+                departure: "17:00",
+                duration: "08:00",
+                total: "07:00",
+            },
+            {
+                id: 2,
+                name: "Петренко Петро Петрович",
+                type: "n",
+                arrival: "22:00",
+                departure: "06:00",
+                duration: "08:00",
+                total: "07:00",
+            },
+            { 
+                id: 3, 
+                name: "Амариуца Валентин", 
+                type: "n", 
+                arrival: "05:57", 
+                departure: "02:57", 
+                duration: "02:57", 
+                total: "02:57" 
+            }
+          ];
+
+        return result;
     }
 
     private addEvent(data: object): void {
         console.log(`Добавление события: `, data);
-        this.emit("update", { message: data });
+
+        const result: rowData = {
+                id: 1,
+                name: "Іваненко Іван Іванович",
+                type: "d",
+                arrival: "08:00",
+                departure: "17:00",
+                duration: "08:00",
+                total: "07:00",
+            }
+
+        this.emit("update", result);
     }
 
     private downloadEvent(): void {
@@ -74,15 +128,11 @@ class Tabel {
     }
 
     private emit(event: string, message: EventMessage): void {
-        console.log('emit');
-        
         if (!this.eventHandlers.has(event)) {
-            console.log('!this.eventHandlers.has(event)');
             return;
         }
 
         for (const handler of this.eventHandlers.get(event)!) {
-            console.log('handler');
             handler(message);
         }
     }
