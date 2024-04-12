@@ -10,20 +10,57 @@ const tabel = new Tabel();
 io.on("connection", (socket) => {
   console.log(`socket user connected: ${socket.id}`);
 
+  (socket as any).activeDate = '00.00.0000';
+
+  const updateHandler = (msg: any) => {
+    try {
+      const activeDate = (socket as any).activeDate;
+      console.log('activeDate', activeDate, msg.day);
+
+      if (msg.day === activeDate) {
+        console.log('update', msg.result);
+        io.emit("update", msg.result);
+      }
+
+    } catch (error) {
+      console.error('tabel update', error);
+    }
+  };
+
+  const notificationHandler = (msg: any) => {
+    try {
+      console.log('notification', msg);
+      
+      io.emit("notification", msg);
+    } catch (error) {
+      console.error('tabel notification', error);
+    }
+  };
+  
   socket.on("disconnect", () => {
-    console.log(`socket user disconnected: ${socket.id}`);
+    try {
+      console.log(`socket user disconnected: ${socket.id}`);
+
+      tabel.off("update", updateHandler);
+      tabel.off("notification", notificationHandler);
+    } catch (error) {
+      console.error('socket disconnect', error);
+    }
   });
 
   socket.on("getList", async (msg) => {
-    console.log('socket getList', msg);
-    const list = await tabel.getList(msg.date);
-    io.emit("list", list);
+    try {
+      (socket as any).activeDate = msg.date;
+
+      const list = await tabel.getList(msg.date);
+      io.emit("list", list);
+    } catch (error) {
+      console.error('socket getList', error);
+    }
   });
 
-  tabel.on("update", (msg) => {
-    console.log('tabel update', msg);
-    io.emit("update", msg);
-  });
+  tabel.on("update", updateHandler);
+  tabel.on("notification", notificationHandler);
 
 });
 
