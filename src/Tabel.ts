@@ -2,8 +2,6 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 
-//import 'dotenv/config';
-
 interface EventMessage {
     [key: string]: any; // Определяет, что каждое сообщение - это объект с любым количеством свойств любого типа
 }
@@ -32,7 +30,9 @@ class Tabel {
     private eventHandlers: Map<string, Function[]> = new Map();
 
     private readonly reconnectInterval = 10000; // Интервал для переподключения
-    private readonly downloadInterval = 20000; // Интервал для переподключения
+    private readonly downloadInterval = 5000; // Интервал для переподключения
+
+    private lastEventID: number = 0;
 
     constructor() {
         this.dbClient = new Client({
@@ -100,47 +100,23 @@ class Tabel {
             total: row.total
         }));
 
-        //console.log('list', rowDataArray);
-        
         return rowDataArray;
-
-
-        const result: rowDataForWebClient[] = [
-            {
-                id: 1,
-                name: "Іваненко Іван Іванович",
-                type: "d",
-                arrival: "08:00",
-                departure: "17:00",
-                duration: "08:00",
-                total: "07:00",
-            },
-            {
-                id: 2,
-                name: "Петренко Петро Петрович",
-                type: "n",
-                arrival: "22:00",
-                departure: "06:00",
-                duration: "08:00",
-                total: "07:00",
-            },
-            { 
-                id: 3, 
-                name: "Амариуца Валентин", 
-                type: "n", 
-                arrival: "05:57", 
-                departure: "02:57", 
-                duration: "02:57", 
-                total: "02:57" 
-            }
-          ];
-
-        return result;
     }
 
     private async addEvent(data: any): Promise<void> {
         const newData = this.getNewDataFromObject(data);
         const oldData = await this.getLastUserEvent(newData.emp_code, newData.punch_time);
+
+        if (this.lastEventID == newData.id) {
+            return;
+        }
+
+        this.lastEventID = newData.id;
+
+        let day = newData.day;
+
+        console.log('addEvent', newData);
+        
 
         const notification = {
             first_name: newData.first_name,
@@ -179,10 +155,11 @@ class Tabel {
                 result = await this.insertRowArrivalToTabel(newData);
             }else{                              // якщо уход
                 result = await this.updateRowDeparture(newData, oldData.id);
+                day = oldData.day;
             }
 
             if (result !== undefined) {
-                const update = {day: '11.04.2024', result: this.getNewDataForWebClientFromObject(result)}
+                const update = {day: day, result: this.getNewDataForWebClientFromObject(result)}
                 this.emit("update", update);
                 this.emit("notification", notification);
             }
@@ -454,9 +431,9 @@ class Tabel {
         try {
             const updateQuery = `UPDATE iclock_transaction SET error = $1 WHERE id = $2 RETURNING *;`;  
             const result2 = await this.dbClient.query(updateQuery, [ true, id ]);
-            const updatedRow = result2.rows[0];
+            //const updatedRow = result2.rows[0];
 
-            console.log('setErrorRowEvent updatedRow', updatedRow);
+            //console.log('setErrorRowEvent updatedRow', updatedRow);
             
         } catch (error) {
             console.error('ERROR setErrorRowEvent', error);

@@ -15,11 +15,11 @@ io.on("connection", (socket) => {
   const updateHandler = (msg: any) => {
     try {
       const activeDate = (socket as any).activeDate;
-      console.log('activeDate', activeDate, msg.day);
+      console.log('update activeDate', socket.id, activeDate, msg.day);
 
       if (msg.day === activeDate) {
-        console.log('update', msg.result);
-        io.emit("update", msg.result);
+        console.log('update', JSON.stringify(msg.result));
+        socket.emit("update", msg.result);
       }
 
     } catch (error) {
@@ -29,9 +29,9 @@ io.on("connection", (socket) => {
 
   const notificationHandler = (msg: any) => {
     try {
-      console.log('notification', msg);
+      console.log('notification', socket.id, JSON.stringify(msg));
       
-      io.emit("notification", msg);
+      socket.emit("notification", msg);
     } catch (error) {
       console.error('tabel notification', error);
     }
@@ -53,9 +53,28 @@ io.on("connection", (socket) => {
       (socket as any).activeDate = msg.date;
 
       const list = await tabel.getList(msg.date);
-      io.emit("list", list);
+      socket.emit("list", list);
+      console.log('socket getList emit');
+      
     } catch (error) {
       console.error('socket getList', error);
+    }
+  });
+
+  socket.on("trueEvent", async (msg) => {
+    try {
+      console.log('socket trueEvent', msg);
+    } catch (error) {
+      console.error('socket trueEvent', error);
+    }
+  });
+
+  socket.on("falseEvent", async (msg) => {
+    try {
+      console.log('socket falseEvent', msg);
+      
+    } catch (error) {
+      console.error('socket falseEvent', error);
     }
   });
 
