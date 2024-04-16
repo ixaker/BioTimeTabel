@@ -2,6 +2,23 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 
+enum errorType {
+    null_Uhod,
+    Uhod_Uhod,
+    Prihod_Prihod
+}
+
+interface Notification {
+    first_name: string;
+    time: string;
+    state: string;
+    error: boolean;
+    errorType?: errorType;  // Опциональное поле, может быть не задано
+    newEvent: rowNewData;
+    oldEvent: rowNewData;
+    terminal_sn: string;
+}
+
 interface EventMessage {
     [key: string]: any; // Определяет, что каждое сообщение - это объект с любым количеством свойств любого типа
 }
@@ -23,6 +40,7 @@ interface rowNewData {
     punch_state: "0" | "1";
     first_name: string;
     day: string;
+    terminal_sn: string;
 }
 
 class Tabel {
@@ -83,72 +101,41 @@ class Tabel {
         });
     }
 
-    public async getList(date: string): Promise<rowDataForWebClient[]> {
+    public async getList(date: string): Promise<Array<any[]>> {
         console.log(`Получение списка событий для даты: ${date}`);
 
         const query = `SELECT * FROM tabel WHERE date = $1;`;
-        const values = [date];
-        const res = await this.dbClient.query(query, values);
+        const res = await this.dbClient.query(query, [date]);
 
-        const rowDataArray = res.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            type: row.type,
-            arrival: row.arrival,
-            departure: row.departure,
-            duration: row.duration,
-            total: row.total
-        }));
+        const rowDataArray = res.rows.map(row => [
+            row.id,
+            row.name,
+            row.type,
+            row.arrival,
+            row.departure,
+            row.duration,
+            row.total
+        ]);
 
         return rowDataArray;
     }
 
     private async addEvent(data: any): Promise<void> {
         const newData = this.getNewDataFromObject(data);
-        const oldData = await this.getLastUserEvent(newData.emp_code, newData.punch_time);
 
-        if (this.lastEventID == newData.id) {
-            return;
-        }
+        console.log('newData', newData);
 
-        this.lastEventID = newData.id;
+        const oldData = await this.getLastUserEvent(newData.emp_code, newData.punch_time, newData.id);
+        console.log('oldData', oldData);
 
-        let day = newData.day;
+        if (this.lastEventID == newData.id) { return; }else{ this.lastEventID = newData.id; }
 
-        console.log('addEvent', newData);
+        const notification = await this.getMsgNotification(newData, oldData)
+
+        console.log('notification', notification);
         
-
-        const notification = {
-            first_name: newData.first_name,
-            time: this.getTimeFromDate(newData.punch_time),
-            state: newData.punch_state === "0" ? "Приход" : "Уход",
-            error: false,
-            msg: ''
-        }
-
-        if (oldData.punch_state === undefined) {
-            if (newData.punch_state === '1') {
-                notification.error = true;
-                notification.msg = 'Можливо помилка, попередній "Приход" не знайдено';
-            }
-        }else{
-            if (newData.punch_state === oldData.punch_state) {
-                notification.error = true;
-                notification.msg = 'Можливо помилка';
-
-                const time = this.getTimeFromDate(oldData.punch_time);
-
-                if (newData.punch_state === '0') {  // якщо перед цим був теж приход то можливо помилка
-                    notification.msg += ', перед цим був теж "Приход"'
-                }else{  // якщо перед цим був теж уход то можливо помилка, або забув відмітити "Приход"
-                    notification.msg += ', перед цим був теж "Уход"'
-                }
-
-                notification.msg += ' - ' + time;
-            }
-        }
-
         if (!notification.error) {
+            let day = newData.day;
             let result: any = {};
 
             if (newData.punch_state === '0') {  // якщо приход
@@ -169,6 +156,37 @@ class Tabel {
             this.setErrorRowEvent(newData.id);
         }
 
+    }
+
+    private async getMsgNotification(newData:rowNewData, oldData:rowNewData): Promise<Notification> {
+        const notification: Notification = {
+            first_name: newData.first_name,
+            time: this.getTimeFromDate(newData.punch_time),
+            state: newData.punch_state === "0" ? "Приход" : "Уход",
+            error: false,
+            newEvent: newData,
+            oldEvent: oldData,
+            terminal_sn: newData.terminal_sn
+        }
+
+        if (oldData.punch_state === undefined) {
+            if (newData.punch_state === '1') {
+                notification.error = true;
+                notification.errorType = errorType.null_Uhod;
+            }
+        }else{
+            if (newData.punch_state === oldData.punch_state) {
+                notification.error = true;
+
+                if (newData.punch_state === '0') {  // якщо перед цим був теж приход то можливо помилка
+                    notification.errorType = errorType.Prihod_Prihod;
+                }else{  // якщо перед цим був теж уход то можливо помилка, або забув відмітити "Приход"
+                    notification.errorType = errorType.Uhod_Uhod;
+                }
+            }
+        }
+
+        return notification;
     }
 
     private async downloadEvent(): Promise<void> {
@@ -277,9 +295,9 @@ class Tabel {
     }
 
     private getNewDataFromObject(data: any): rowNewData {
-        const { id, emp_code, punch_time, punch_state, first_name } = data;
+        const { id, emp_code, punch_time, punch_state, first_name, terminal_sn } = data;
         const day = this.getDayFromDate(punch_time);
-        return { id, emp_code, punch_time, punch_state, first_name, day };
+        return { id, emp_code, punch_time, punch_state, first_name, day, terminal_sn };
     }
 
     private getNewDataForWebClientFromObject(data: any): rowDataForWebClient {
@@ -303,7 +321,7 @@ class Tabel {
         return `${hour}:${minute}`;
     }
 
-    private async getLastUserEvent(emp_code: string, date: Date): Promise<rowNewData> {
+    private async getLastUserEvent(emp_code: string, date: Date, id:number): Promise<rowNewData> {
         try {
             const queryText = `
                 SELECT 
@@ -315,7 +333,7 @@ class Tabel {
                     personnel_employee e ON t.emp_code = e.emp_code
                 WHERE 
                     t.emp_code = $1 
-                    AND t.punch_time < $2 
+                    AND t.id < $2 
                     AND t.punch_time > $3 
                     AND t.error = false
                 ORDER BY 
@@ -324,11 +342,13 @@ class Tabel {
             `;
 
             const minDate = new Date(date.getTime() - 20 * 60 * 60 * 1000);
-            const values = [emp_code, date, minDate];
+            const values = [emp_code, id, minDate];
             const res = await this.dbClient.query(queryText, values);
             const data = res.rows.length > 0 ? res.rows[0] : {};  
             const newData = this.getNewDataFromObject(data);
 
+            //console.log('getLastUserEvent', emp_code, date, newData);
+            
             return newData;
 
         } catch (error) {
@@ -438,6 +458,29 @@ class Tabel {
         } catch (error) {
             console.error('ERROR setErrorRowEvent', error);
         }
+    }
+
+    public async setStateEventIsFalse(date: Notification): Promise<void> {
+        //console.log('setStateEventIsFalse', date);
+
+        const newData = date.newEvent;
+        newData.punch_state = newData.punch_state === "0" ? "1" : "0";
+
+        const updateQuery = `UPDATE iclock_transaction SET punch_state = $1, error = $2 WHERE id = $3 RETURNING *;`;  
+        const values = [ newData.punch_state, false, newData.id];
+        const result = await this.dbClient.query(updateQuery, values);
+        const updatedRow = result.rows[0];
+        //console.log('updatedRow', updatedRow);
+
+        updatedRow.first_name = newData.first_name;
+
+        this.lastEventID = 0;
+        this.addEvent(updatedRow);
+    }
+
+    public setStateEventIsTrue(date: Notification): void {
+        console.log('setStateEventIsTrue', date);
+
     }
 }
 

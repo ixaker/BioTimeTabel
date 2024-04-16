@@ -29,9 +29,15 @@ io.on("connection", (socket) => {
 
   const notificationHandler = (msg: any) => {
     try {
-      console.log('notification', socket.id, JSON.stringify(msg));
+      //console.log('notification', socket.id, JSON.stringify(msg));
+      //console.log('notification', socket.id, msg);
+      const terminal_sns: string[] = (socket as any).terminal_sns;
+      const result: boolean = terminal_sns.length === 0 || terminal_sns.includes(msg.terminal_sn||'');
+
+      if (result) {
+        socket.emit("notification", msg);
+      }
       
-      socket.emit("notification", msg);
     } catch (error) {
       console.error('tabel notification', error);
     }
@@ -52,6 +58,16 @@ io.on("connection", (socket) => {
     try {
       (socket as any).activeDate = msg.date;
 
+      const terminal_sns: string[] = [];
+
+      if ("terminal_sns" in msg) {
+        msg.terminal_sns.forEach((sn: string) => {
+          terminal_sns.push(sn);
+        });
+      }
+
+      (socket as any).terminal_sns = terminal_sns;
+
       const list = await tabel.getList(msg.date);
       socket.emit("list", list);
       console.log('socket getList emit');
@@ -63,7 +79,7 @@ io.on("connection", (socket) => {
 
   socket.on("trueEvent", async (msg) => {
     try {
-      console.log('socket trueEvent', msg);
+      tabel.setStateEventIsTrue(msg);
     } catch (error) {
       console.error('socket trueEvent', error);
     }
@@ -71,8 +87,7 @@ io.on("connection", (socket) => {
 
   socket.on("falseEvent", async (msg) => {
     try {
-      console.log('socket falseEvent', msg);
-      
+      tabel.setStateEventIsFalse(msg);
     } catch (error) {
       console.error('socket falseEvent', error);
     }
