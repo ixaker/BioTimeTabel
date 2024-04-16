@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import axios from 'axios';
 
 enum errorType {
     null_Uhod,
@@ -48,7 +49,8 @@ class Tabel {
     private eventHandlers: Map<string, Function[]> = new Map();
 
     private readonly reconnectInterval = 10000; // Интервал для переподключения
-    private readonly downloadInterval = 5000; // Интервал для переподключения
+    private readonly downloadInterval = 20000; // Интервал для скаживания пропущенных событий
+    private readonly syncTo1CInterval = 10000; // Интервал для синхронизации с 1С
 
     private lastEventID: number = 0;
 
@@ -65,6 +67,8 @@ class Tabel {
         
         setInterval(() => { this.downloadEvent(); }, this.downloadInterval);
         this.downloadEvent();
+
+        setInterval(() => { this.syncTabel(); }, this.syncTo1CInterval);
     }
 
     private connectToDb(): void {
@@ -123,16 +127,16 @@ class Tabel {
     private async addEvent(data: any): Promise<void> {
         const newData = this.getNewDataFromObject(data);
 
-        console.log('newData', newData);
+        //console.log('newData', newData);
 
         const oldData = await this.getLastUserEvent(newData.emp_code, newData.punch_time, newData.id);
-        console.log('oldData', oldData);
+        //console.log('oldData', oldData);
 
         if (this.lastEventID == newData.id) { return; }else{ this.lastEventID = newData.id; }
 
         const notification = await this.getMsgNotification(newData, oldData)
 
-        console.log('notification', notification);
+        //console.log('notification', notification);
         
         if (!notification.error) {
             let day = newData.day;
@@ -149,6 +153,7 @@ class Tabel {
                 const update = {day: day, result: this.getNewDataForWebClientFromObject(result)}
                 this.emit("update", update);
                 this.emit("notification", notification);
+                this.syncRowFromTabelTo1C(result);
             }
             
         }else{
@@ -281,13 +286,14 @@ class Tabel {
                         emp_code CHAR(20),
                         arrival_id integer,
                         arrival_date timestamp with time zone,
-                        departure_date timestamp with time zone
+                        departure_date timestamp with time zone,
+                        sync boolean NOT NULL DEFAULT false
                     );
                 `;
                 await this.dbClient.query(createQuery);
-                console.log("Таблица 'iclock_transaction' создана.");
+                console.log("Таблица 'tabel' создана.");
             } else {
-                console.log("Таблица 'iclock_transaction' уже существует.");
+                console.log("Таблица 'tabel' уже существует.");
             }
         } catch (error) {
             console.error("Ошибка при проверке или создании таблицы:", error);
@@ -419,18 +425,22 @@ class Tabel {
             
                 if (result && result.rowCount !== null) {
                     if (result.rowCount > 0) {
-                        
+                        const punch_time = data.punch_time;
+                        punch_time.setSeconds(0, 0);
 
-                        const difference = data.punch_time.getTime() - result.rows[0].arrival_date.getTime();
+                        const arrival_date = result.rows[0].arrival_date;
+                        arrival_date.setSeconds(0, 0);
+
+                        const difference = punch_time.getTime() - arrival_date.getTime();
                         const hours = Math.floor(difference / (1000 * 60 * 60));
                         const minutes = Math.floor((difference / (1000 * 60)) % 60);
                         const formattedHours = hours.toString().padStart(2, '0');
                         const formattedMinutes = minutes.toString().padStart(2, '0');
                         const diffTime = `${formattedHours}:${formattedMinutes}`;
 
-                        const updateQuery = `UPDATE tabel SET departure = $1, departure_date = $2, duration = $3 WHERE arrival_id = $4 RETURNING *;`;  
+                        const updateQuery = `UPDATE tabel SET departure = $1, departure_date = $2, duration = $3, sync = $4 WHERE arrival_id = $5 RETURNING *;`;  
                         const departure = this.getTimeFromDate(data.punch_time);
-                        const values = [ departure, data.punch_time, diffTime, arrival_id ];
+                        const values = [ departure, data.punch_time, diffTime, false, arrival_id ];
                         const result2 = await this.dbClient.query(updateQuery, values);
                         const updatedRow = result2.rows[0];
 
@@ -482,6 +492,61 @@ class Tabel {
         console.log('setStateEventIsTrue', date);
 
     }
+
+    private async syncTabel() : Promise<void> {
+        console.log('syncTabel');
+
+        try {
+            const queryText = `SELECT * FROM public.tabel WHERE sync = false ORDER BY id ASC LIMIT 50;`;
+            const res = await this.dbClient.query(queryText);
+
+            for (const row of res.rows) {
+                this.syncRowFromTabelTo1C(row);
+            }
+
+        } catch (error) {
+            console.error('Error in syncTabel() : ', error);
+        }
+    }
+
+    private async syncRowFromTabelTo1C(data: any) : Promise<void> {
+        console.log('syncRowFromTabelTo1C', data);
+
+        try {
+            const url = `http://${process.env['1C_HOST']}/${process.env['1C_BASE']}/hs/tabel/update`;
+            const auth = { username: process.env['1C_USER'] || '', password: process.env['1C_PASS'] || '' };
+            const response = await axios.post(url, data, { auth: auth});
+
+            if (!response.data.error) {
+                let total = response.data.total;
+                this.setTotalTimeForRowTabel(response.data.id, total)
+            }
+
+            console.log('Response:', response.data);
+        } catch (error) {
+            console.error('Error syncRowFromTabelTo1C() : ', error);
+        }
+        
+    }
+
+    private async setTotalTimeForRowTabel(id: number, total: string) : Promise<void> {
+        try {
+            const updateQuery = `UPDATE tabel SET total = $1, sync = $2 WHERE id = $3 RETURNING *;`;  
+            const values = [ total, true, id ];
+            const result = await this.dbClient.query(updateQuery, values);
+            const updatedRow = result.rows[0]; 
+
+            console.log('setTotalTimeForRowTabel', updatedRow);
+
+            if (result !== undefined) {
+                const update = {day: updatedRow.date, result: this.getNewDataForWebClientFromObject(updatedRow)}
+                this.emit("update", update);
+            }
+        } catch (error) {
+            console.error('Error setTotalTimeForRowTabel() : ', error);
+        }
+    }
+
 }
 
 
