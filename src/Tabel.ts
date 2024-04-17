@@ -50,7 +50,7 @@ class Tabel {
 
     private readonly reconnectInterval = 10000; // Интервал для переподключения
     private readonly downloadInterval = 20000; // Интервал для скаживания пропущенных событий
-    private readonly syncTo1CInterval = 10000; // Интервал для синхронизации с 1С
+    private readonly syncTo1CInterval = 30000; // Интервал для синхронизации с 1С
 
     private lastEventID: number = 0;
 
@@ -84,11 +84,7 @@ class Tabel {
                 this.dbClient.on('notification', (msg: any) => {
                     try {
                         const payload = JSON.parse(msg.payload);
-                        payload.notification = true; 
                         payload.punch_time = new Date(payload.punch_time);  
-                        
-                        //console.log('notification', payload);
-                        
                         this.addEvent(payload);
                     } catch (error) {
                         console.error('Ошибка при разборе JSON:', error);
@@ -126,27 +122,24 @@ class Tabel {
 
     private async addEvent(data: any): Promise<void> {
         const newData = this.getNewDataFromObject(data);
-
-        //console.log('newData', newData);
-
         const oldData = await this.getLastUserEvent(newData.emp_code, newData.punch_time, newData.id);
-        //console.log('oldData', oldData);
 
         if (this.lastEventID == newData.id) { return; }else{ this.lastEventID = newData.id; }
 
         const notification = await this.getMsgNotification(newData, oldData)
+        this.runNotification(notification);
+    }
 
-        //console.log('notification', notification);
-        
+    private async runNotification(notification: Notification) : Promise<void> {
         if (!notification.error) {
-            let day = newData.day;
+            let day = notification.newEvent.day;
             let result: any = {};
 
-            if (newData.punch_state === '0') {  // якщо приход
-                result = await this.insertRowArrivalToTabel(newData);
+            if (notification.newEvent.punch_state === '0') {  // якщо приход
+                result = await this.insertRowArrivalToTabel(notification.newEvent);
             }else{                              // якщо уход
-                result = await this.updateRowDeparture(newData, oldData.id);
-                day = oldData.day;
+                result = await this.updateRowDeparture(notification.newEvent, notification.oldEvent.id);
+                day =  notification.oldEvent.day;
             }
 
             if (result !== undefined) {
@@ -158,9 +151,8 @@ class Tabel {
             
         }else{
             this.emit("notification", notification);
-            this.setErrorRowEvent(newData.id);
+            this.setErrorRowEvent(notification.newEvent.id, true);
         }
-
     }
 
     private async getMsgNotification(newData:rowNewData, oldData:rowNewData): Promise<Notification> {
@@ -195,8 +187,6 @@ class Tabel {
     }
 
     private async downloadEvent(): Promise<void> {
-        //console.log('start downloadEvent');
-        
         try {
             const queryText = `
                 SELECT 
@@ -217,22 +207,17 @@ class Tabel {
             const values = [ID_EVNT];
             const res = await this.dbClient.query(queryText, values);
     
-            console.log('rows', res.rows.length);
-    
             for (const row of res.rows) {
                 row.notification = false;
                 this.addEvent(row);
                 this.saveVarDotENV('ID_EVNT', row.id);
             }
-    
         } catch (error) {
             console.error('Error in downloadEvent() :', error);
         }
     }
     
-    public on(event: string, handler: (msg: EventMessage) => void): void {
-        console.log('tabel on', event);
-        
+    public on(event: string, handler: (msg: EventMessage) => void): void { 
         if (!this.eventHandlers.has(event)) {
             this.eventHandlers.set(event, []);
         }
@@ -240,8 +225,6 @@ class Tabel {
     }
 
     public off(event: string, handler: (msg: EventMessage) => void): void {
-        console.log('tabel off', event);
-
         const handlers = this.eventHandlers.get(event);
         if (handlers) {
             const newHandlers = handlers.filter(h => h !== handler);
@@ -261,18 +244,11 @@ class Tabel {
 
     private async checkExistTable(): Promise<void> {
         try {
-            // Проверяем наличие таблицы
-            const checkQuery = `
-                SELECT EXISTS (
-                    SELECT FROM pg_tables
-                    WHERE schemaname = 'public' AND tablename  = 'tabel'
-                );
-            `;
+            const checkQuery = `SELECT EXISTS ( SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename  = 'tabel' );`;
             const checkRes = await this.dbClient.query(checkQuery);
             const exists = checkRes.rows[0].exists;
 
             if (!exists) {
-                // Создаем таблицу, если она не существует
                 const createQuery = `
                     CREATE TABLE tabel (
                         id SERIAL PRIMARY KEY,
@@ -291,9 +267,6 @@ class Tabel {
                     );
                 `;
                 await this.dbClient.query(createQuery);
-                console.log("Таблица 'tabel' создана.");
-            } else {
-                console.log("Таблица 'tabel' уже существует.");
             }
         } catch (error) {
             console.error("Ошибка при проверке или создании таблицы:", error);
@@ -353,10 +326,7 @@ class Tabel {
             const data = res.rows.length > 0 ? res.rows[0] : {};  
             const newData = this.getNewDataFromObject(data);
 
-            //console.log('getLastUserEvent', emp_code, date, newData);
-            
             return newData;
-
         } catch (error) {
             const data = {};
             const newData = this.getNewDataFromObject(data); 
@@ -382,7 +352,6 @@ class Tabel {
         let needInsertRow = true;
 
         try {
-            // Выполняем SQL-запрос с использованием arrival_id из переменной
             const result = await this.dbClient.query(selectQuery, [data.id]);
         
             if (result && result.rowCount !== null) {
@@ -393,8 +362,6 @@ class Tabel {
         } catch (error) {
             console.error('Ошибка при поиске строки:', error);
         }
-
-
 
         if (needInsertRow) {
             const insertQuery = `INSERT INTO tabel (name, type, arrival, departure, duration, total, date, emp_code, arrival_id, arrival_date)
@@ -407,9 +374,7 @@ class Tabel {
             try {
                 const result = await this.dbClient.query(insertQuery, values);
                 const insertedRow = result.rows[0];
-                
                 return insertedRow;
-                //console.log('Новая строка была успешно добавлена:', insertedRow);
             } catch (error) {
                 console.error('Ошибка при добавлении новой строки:', error);
             }
@@ -445,7 +410,6 @@ class Tabel {
                         const updatedRow = result2.rows[0];
 
                         return updatedRow;
-                        //console.log('Строка успешно обновлена:', updatedRow);
                     }
                 }
             } catch (error) {
@@ -457,22 +421,18 @@ class Tabel {
         }
     } 
 
-    private async setErrorRowEvent(id: number) : Promise<void> {
+    private async setErrorRowEvent(id: number, state: boolean) : Promise<any> {
         try {
             const updateQuery = `UPDATE iclock_transaction SET error = $1 WHERE id = $2 RETURNING *;`;  
-            const result2 = await this.dbClient.query(updateQuery, [ true, id ]);
-            //const updatedRow = result2.rows[0];
-
-            //console.log('setErrorRowEvent updatedRow', updatedRow);
-            
+            const result = await this.dbClient.query(updateQuery, [ state, id ]);
+            const updatedRow = result.rows[0];
+            return updatedRow;
         } catch (error) {
             console.error('ERROR setErrorRowEvent', error);
         }
     }
 
     public async setStateEventIsFalse(date: Notification): Promise<void> {
-        //console.log('setStateEventIsFalse', date);
-
         const newData = date.newEvent;
         newData.punch_state = newData.punch_state === "0" ? "1" : "0";
 
@@ -480,7 +440,6 @@ class Tabel {
         const values = [ newData.punch_state, false, newData.id];
         const result = await this.dbClient.query(updateQuery, values);
         const updatedRow = result.rows[0];
-        //console.log('updatedRow', updatedRow);
 
         updatedRow.first_name = newData.first_name;
 
@@ -488,9 +447,12 @@ class Tabel {
         this.addEvent(updatedRow);
     }
 
-    public setStateEventIsTrue(date: Notification): void {
-        console.log('setStateEventIsTrue', date);
+    public setStateEventIsTrue(notification: Notification): void {
+        console.log('setStateEventIsTrue', notification);
 
+        this.setErrorRowEvent(notification.newEvent.id, false);
+        notification.error = false;
+        this.runNotification(notification); 
     }
 
     private async syncTabel() : Promise<void> {
@@ -510,8 +472,6 @@ class Tabel {
     }
 
     private async syncRowFromTabelTo1C(data: any) : Promise<void> {
-        console.log('syncRowFromTabelTo1C', data);
-
         try {
             const url = `http://${process.env['1C_HOST']}/${process.env['1C_BASE']}/hs/tabel/update`;
             const auth = { username: process.env['1C_USER'] || '', password: process.env['1C_PASS'] || '' };
@@ -521,12 +481,9 @@ class Tabel {
                 let total = response.data.total;
                 this.setTotalTimeForRowTabel(response.data.id, total)
             }
-
-            console.log('Response:', response.data);
         } catch (error) {
             console.error('Error syncRowFromTabelTo1C() : ', error);
         }
-        
     }
 
     private async setTotalTimeForRowTabel(id: number, total: string) : Promise<void> {
@@ -535,8 +492,6 @@ class Tabel {
             const values = [ total, true, id ];
             const result = await this.dbClient.query(updateQuery, values);
             const updatedRow = result.rows[0]; 
-
-            console.log('setTotalTimeForRowTabel', updatedRow);
 
             if (result !== undefined) {
                 const update = {day: updatedRow.date, result: this.getNewDataForWebClientFromObject(updatedRow)}
@@ -549,9 +504,5 @@ class Tabel {
 
 }
 
-
 export default Tabel;
-
-
-
 

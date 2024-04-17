@@ -15,10 +15,8 @@ io.on("connection", (socket) => {
   const updateHandler = (msg: any) => {
     try {
       const activeDate = (socket as any).activeDate;
-      console.log('update activeDate', socket.id, activeDate, msg.day);
 
       if (msg.day === activeDate) {
-        console.log('update', JSON.stringify(msg.result));
         socket.emit("update", msg.result);
       }
 
@@ -29,8 +27,6 @@ io.on("connection", (socket) => {
 
   const notificationHandler = (msg: any) => {
     try {
-      //console.log('notification', socket.id, JSON.stringify(msg));
-      //console.log('notification', socket.id, msg);
       const terminal_sns: string[] = (socket as any).terminal_sns;
       const result: boolean = terminal_sns.length === 0 || terminal_sns.includes(msg.terminal_sn||'');
 
@@ -67,11 +63,9 @@ io.on("connection", (socket) => {
       }
 
       (socket as any).terminal_sns = terminal_sns;
-
-      const list = await tabel.getList(msg.date);
-      socket.emit("list", list);
-      console.log('socket getList emit');
       
+      const list = await tabel.getList(msg.date);
+      socket.emit("list", list);  
     } catch (error) {
       console.error('socket getList', error);
     }

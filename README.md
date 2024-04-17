@@ -14,6 +14,11 @@ WS_PORT=3000
 ID_EVNT=30000
 
 
+# commands
+net start Tabel
+net stop Tabel
+npm run dev
+npm run build
 
 
 # install Nginx as service
