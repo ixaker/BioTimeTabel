@@ -263,7 +263,8 @@ class Tabel {
                         arrival_id integer,
                         arrival_date timestamp with time zone,
                         departure_date timestamp with time zone,
-                        sync boolean NOT NULL DEFAULT false
+                        sync boolean NOT NULL DEFAULT false,
+                        terminal_sn CHAR(25)
                     );
                 `;
                 await this.dbClient.query(createQuery);
@@ -364,12 +365,12 @@ class Tabel {
         }
 
         if (needInsertRow) {
-            const insertQuery = `INSERT INTO tabel (name, type, arrival, departure, duration, total, date, emp_code, arrival_id, arrival_date)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *; `;
+            const insertQuery = `INSERT INTO tabel (name, type, arrival, departure, duration, total, date, emp_code, arrival_id, arrival_date, terminal_sn)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *; `;
 
             const arrival = this.getTimeFromDate(data.punch_time);
             const smena = arrival > "16:00" ? "n" : "d";
-            const values = [data.first_name, smena, arrival, '', '', '', data.day, data.emp_code, data.id, data.punch_time];
+            const values = [data.first_name, smena, arrival, '', '', '', data.day, data.emp_code, data.id, data.punch_time, data.terminal_sn];
 
             try {
                 const result = await this.dbClient.query(insertQuery, values);
@@ -476,6 +477,9 @@ class Tabel {
             const url = `http://${process.env['1C_HOST']}/${process.env['1C_BASE']}/hs/tabel/update`;
             const auth = { username: process.env['1C_USER'] || '', password: process.env['1C_PASS'] || '' };
             const response = await axios.post(url, data, { auth: auth});
+
+            console.log('syncRowFromTabelTo1C', response.data);
+            
 
             if (!response.data.error) {
                 let total = response.data.total;
