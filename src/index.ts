@@ -27,7 +27,7 @@ io.on("connection", (socket) => {
 
   const notificationHandler = (msg: any) => {
     try {
-      const terminal_sns: string[] = (socket as any).terminal_sns;
+      const terminal_sns: string[] = (socket as any).terminal_sns||[];
       const result: boolean = terminal_sns.length === 0 || terminal_sns.includes(msg.terminal_sn||'');
 
       if (result) {
@@ -52,6 +52,8 @@ io.on("connection", (socket) => {
 
   socket.on("getList", async (msg) => {
     try {
+      console.log('getList', msg);
+      
       (socket as any).activeDate = msg.date;
 
       const terminal_sns: string[] = [];
