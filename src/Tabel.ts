@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import axios from 'axios';
+import delay from './utils';
 
 enum errorType {
     null_Uhod,
@@ -45,6 +46,8 @@ interface rowNewData {
     day: string;
     terminal_sn: string;
 }
+
+
 
 class Tabel {
     private dbClient: Client;
@@ -156,7 +159,6 @@ class Tabel {
             this.setErrorRowEvent(notification.newEvent.id, true);
         }
     }
-
 
 
     private async getMsgNotification(newData: rowNewData, oldData: rowNewData): Promise<Notification> {
@@ -478,11 +480,12 @@ class Tabel {
         console.log('syncTabel');
 
         try {
-            const queryText = `SELECT * FROM public.tabel WHERE sync = false ORDER BY id ASC LIMIT 50;`;
+            const queryText = `SELECT * FROM public.tabel WHERE sync = false ORDER BY id ASC LIMIT 5;`;
             const res = await this.dbClient.query(queryText);
 
             for (const row of res.rows) {
                 this.syncRowFromTabelTo1C(row);
+                delay(15000)
             }
 
         } catch (error) {
