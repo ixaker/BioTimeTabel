@@ -55,7 +55,7 @@ class Tabel {
 
     private readonly reconnectInterval = 10000; // Интервал для переподключения
     private readonly downloadInterval = 20000; // Интервал для скаживания пропущенных событий
-    private readonly syncTo1CInterval = 30000; // Интервал для синхронизации с 1С
+    private readonly syncTo1CInterval = 20000; // Интервал для синхронизации с 1С
 
     private lastEventID: number = 0;
 
@@ -485,7 +485,7 @@ class Tabel {
 
             for (const row of res.rows) {
                 this.syncRowFromTabelTo1C(row);
-                delay(15000)
+                delay(1500);
             }
 
         } catch (error) {
