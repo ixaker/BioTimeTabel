@@ -485,7 +485,7 @@ class Tabel {
 
             for (const row of res.rows) {
                 this.syncRowFromTabelTo1C(row);
-                delay(1500);
+                delay(2000);
             }
 
         } catch (error) {
